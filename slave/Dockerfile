@@ -1,23 +1,66 @@
-FROM jenkins/jnlp-slave
+FROM ubuntu:18.04
 
-# # install Maven
+LABEL MAINTAINER="Kasun Ranasinghe <kasunranasinghe303@gmail.com>"
+LABEL Description="This is a base image, which allows connecting Jenkins agents via JNLP protocols"
+
 USER root
-RUN apt update -y
-
-RUN apt install -y apt-transport-https  ca-certificates  curl  gnupg2  software-properties-common
-RUN curl -fsSL https://apt.dockerproject.org/gpg | apt-key add -
-RUN apt-add-repository "deb https://apt.dockerproject.org/repo debian-$(lsb_release -cs) main"
 RUN apt-get update
-RUN apt-cache policy docker-engine
-RUN apt-get install -y docker-engine=1.13.1-0~debian-stretch
-VOLUME /root/.docker
-RUN cd /usr/bin && curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.17.0/bin/linux/amd64/kubectl
-RUN chmod +x /usr/bin/kubectl
-COPY config /root/.kube/
-RUN wget -O /root/helm.tar.gz https://get.helm.sh/helm-v2.15.2-linux-amd64.tar.gz
-RUN cd /root && tar -zxvf helm.tar.gz
-RUN cd /root && mv /root/linux-amd64/helm /usr/bin/helm
-RUN chmod +x /usr/bin/helm
-RUN cp -a /usr/bin/helm /usr/local/bin/helm
-RUN helm init --upgrade
+RUN apt-get install -y openjdk-11-jre-headless
+
+RUN apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg-agent \
+    software-properties-common
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -  
+RUN apt-key fingerprint 0EBFCD88 
+RUN add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+RUN apt-get update
+RUN apt-get install -y docker-ce-cli
+
+ARG VERSION=4.5
+ARG user=jenkins
+ARG group=jenkins
+ARG uid=1000
+ARG gid=1000
+
+RUN groupadd -g ${gid} ${group}
+RUN useradd -c "Jenkins user" -d /home/${user} -u ${uid} -g ${gid} -m ${user}
+
+ARG AGENT_WORKDIR=/home/${user}/agent
+
+RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash
+RUN apt-get update && apt-get install -y git-lfs
+
+
+RUN curl --create-dirs -fsSLo /usr/share/jenkins/agent.jar https://repo.jenkins-ci.org/public/org/jenkins-ci/main/remoting/${VERSION}/remoting-${VERSION}.jar \
+  && chmod 755 /usr/share/jenkins \
+  && chmod 644 /usr/share/jenkins/agent.jar \
+  && ln -sf /usr/share/jenkins/agent.jar /usr/share/jenkins/slave.jar
+
+RUN apt-get purge -y \
+    apt-transport-https \
+    curl \
+    gnupg-agent
+
+RUN apt-get clean -y && apt-get autoremove -y
+
+USER ${user}
+ENV AGENT_WORKDIR=${AGENT_WORKDIR}
+RUN mkdir /home/${user}/.jenkins && mkdir -p ${AGENT_WORKDIR}
+
+VOLUME /home/${user}/.jenkins
+VOLUME ${AGENT_WORKDIR}
+WORKDIR /home/${user}
+
+ARG user=jenkins
 USER root
+COPY jenkins-agent /usr/local/bin/jenkins-agent
+RUN chmod +x /usr/local/bin/jenkins-agent &&\
+    ln -s /usr/local/bin/jenkins-agent /usr/local/bin/jenkins-slave
+
+ENTRYPOINT ["jenkins-agent"]
